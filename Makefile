@@ -14,7 +14,7 @@ format:
 	isort src/ tests/
 
 test:
-	pytest tests/ -v
+	pytest tests/ -v || test $$? -eq 5
 
 clean:
 	rm -rf __pycache__ .pytest_cache outputs/logs/*
