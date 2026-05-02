@@ -3,11 +3,16 @@
 # Paths
 DATA_RAW_DIR = "data/raw"
 DATA_PROCESSED_DIR = "data/processed"
-MAESTRO_CSV = "data/raw/maestro-v3.0.0.csv"
+MAESTRO_BASE_DIR = "data/raw/maestro-v3.0.0"
+MAESTRO_CSV = "data/raw/maestro-v3.0.0/maestro-v3.0.0.csv"
 VOCAB_PATH = "data/processed/vocabulary.json"
 MODEL_DIR = "outputs/models"
 MIDI_OUTPUT_DIR = "outputs/midi"
 LOG_DIR = "outputs/logs"
+VALIDATION_PLOTS_DIR = "outputs/logs/validation_plots"
+
+# Data Validation
+OUTLIER_IQR_FACTOR = 3.0          # IQR multiplier for outlier detection
 
 # Tokenization
 TIME_SHIFT_MS_PER_BIN = 10       # 10ms per time shift bin
