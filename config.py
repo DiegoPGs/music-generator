@@ -21,6 +21,10 @@ MAX_TIME_SHIFT_BINS = 100        # max 1 second per TIME_SHIFT token
 VELOCITY_BINS = 32               # quantize velocity into 32 levels
 VOCAB_SIZE = 388                 # 128 NOTE_ON + 128 NOTE_OFF + 100 TIME_SHIFT + 32 SET_VELOCITY
 
+# Dataset pipeline
+DATASET_SHUFFLE_BUFFER = 10000   # window-level shuffle buffer size
+DATASET_WINDOW_SHIFT = 1         # stride between sliding windows (1 = fully overlapping)
+
 # Training
 SEQUENCE_LENGTH = 64             # tokens per training sample
 BATCH_SIZE = 64
