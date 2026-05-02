@@ -116,6 +116,7 @@ También se consulta el [tutorial oficial de TensorFlow para generación musical
 
 - Diego Ignacio Puente Gallegos — ITAM, MCC
 - Francisco Amando Gómez Domínguez — ITAM, MCC
+- Gustavo Adrían Pardo Martínez — ITAM, MCD
 
 ## Licencia
 
