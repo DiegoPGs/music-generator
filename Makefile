@@ -1,7 +1,7 @@
 .PHONY: setup lint format test clean
 
 setup:
-	python -m venv venv
+	python3.10 -m venv venv
 	. venv/bin/activate && pip install -r requirements.txt
 	mkdir -p data/raw data/processed outputs/models outputs/midi outputs/logs
 
