@@ -1,20 +1,11 @@
 """Tests for src/data_validation.py."""
 
-import os
-
-import numpy as np
 import pandas as pd
 import pretty_midi
 import pytest
 
-from src.data_validation import (
-    build_stats_dataframe,
-    extract_midi_stats,
-    flag_outliers,
-    load_metadata,
-    validate_splits,
-)
-
+from src.data_validation import (build_stats_dataframe, extract_midi_stats,
+                                 flag_outliers, load_metadata, validate_splits)
 
 # ---------------------------------------------------------------------------
 # Helpers

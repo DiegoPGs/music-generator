@@ -10,6 +10,7 @@ MODEL_DIR = "outputs/models"
 MIDI_OUTPUT_DIR = "outputs/midi"
 LOG_DIR = "outputs/logs"
 VALIDATION_PLOTS_DIR = "outputs/logs/validation_plots"
+SEQUENCES_DIR = "data/processed/sequences"
 
 # Data Validation
 OUTLIER_IQR_FACTOR = 3.0          # IQR multiplier for outlier detection

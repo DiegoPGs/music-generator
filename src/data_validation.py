@@ -6,15 +6,15 @@ from typing import Dict, Tuple
 
 import matplotlib
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import pretty_midi
-import seaborn as sns
-from tqdm import tqdm
+matplotlib.use("Agg")  # non-interactive backend; must precede pyplot import
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import pretty_midi  # noqa: E402
+import seaborn as sns  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
-import config
+import config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +117,12 @@ def build_stats_dataframe(df: pd.DataFrame, base_dir: str) -> pd.DataFrame:
         midi_path = os.path.join(base_dir, row["midi_filename"])
         if not os.path.exists(midi_path):
             logger.warning("MIDI not found on disk: %s", midi_path)
-            stats = {k: None for k in ["duration_computed", "note_count", "min_pitch", "max_pitch",
-                                        "pitch_range", "mean_velocity", "std_velocity",
-                                        "mean_tempo", "notes_per_second", "parse_error"]}
+            null_keys = [
+                "duration_computed", "note_count", "min_pitch", "max_pitch",
+                "pitch_range", "mean_velocity", "std_velocity",
+                "mean_tempo", "notes_per_second", "parse_error",
+            ]
+            stats = {k: None for k in null_keys}
         else:
             stats = extract_midi_stats(midi_path)
             stats["duration_computed"] = stats.pop("duration")
