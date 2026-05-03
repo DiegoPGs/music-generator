@@ -64,7 +64,7 @@ lstm-music-generation/
 
 ```bash
 # Clonar el repositorio
-git clone <repo-url>
+git clone https://github.com/DiegoPGs/music-generator
 cd lstm-music-generation
 
 # Crear entorno virtual
