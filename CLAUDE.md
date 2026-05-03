@@ -305,3 +305,38 @@ pytest               # Testing
 - Commit messages: imperative mood, concise (e.g., "Add event tokenizer for MIDI files")
 - Never commit data files — `data/raw/` and `data/processed/` are gitignored
 - Never commit model checkpoints — `outputs/models/` is gitignored
+
+---
+
+## Project Status — 2026-05-02
+
+All six development phases are **complete**. The full pipeline is implemented and tested.
+
+### Phase completion
+
+| Phase | Module | Tests | Status |
+|-------|--------|-------|--------|
+| 0 | Scaffolding, config, Makefile | — | Done |
+| 1 | `src/data_validation.py` | 19 | Done |
+| 2 | `src/preprocessing.py` | 30 | Done |
+| 3 | `src/dataset.py` | 13 | Done |
+| 4 | `src/model.py` | 25 | Done |
+| 5 | `src/train.py` | 23 | Done |
+| 6 | `src/generate.py` | 27 | Done |
+
+**Total: 137/137 tests passing. Lint clean (flake8 + isort).**
+
+### Runtime notes
+
+- System Python is 3.14.4, which is incompatible with TensorFlow. The venv uses `/usr/bin/python3.10`. Run `make setup` to create it.
+- `tensorboard>=2.12` is required and included in `requirements.txt`.
+
+### Next steps
+
+The codebase is ready for a real training run on the MAESTRO v3.0.0 dataset:
+
+1. Download MAESTRO v3.0.0 into `data/raw/maestro-v3.0.0/`
+2. Run `python -m src.preprocessing` to tokenize all MIDI files → `data/processed/sequences/`
+3. Run `python -m src.train` (or `python src/train.py`) to train the model
+4. Run `python src/generate.py --model outputs/models/best_model.keras --output outputs/midi/gen.midi`
+- Never commit model checkpoints — `outputs/models/` is gitignored
