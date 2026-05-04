@@ -23,13 +23,13 @@ test:
 	pytest tests/ -v || test $$? -eq 5
 
 preprocess:
-	. venv/bin/activate && python src/preprocessing.py
+	. venv/bin/activate && python -m src.preprocessing
 
 train:
-	. venv/bin/activate && python src/train.py
+	. venv/bin/activate && python -m src.train
 
 generate:
-	. venv/bin/activate && python src/generate.py \
+	. venv/bin/activate && python -m src.generate \
 		--model outputs/models/best_model.keras \
 		--output outputs/midi/generated.midi \
 		--vocab data/processed/vocabulary.json \

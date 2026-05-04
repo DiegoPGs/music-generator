@@ -75,7 +75,7 @@ echo "MAESTRO dataset found."
 if [[ $SKIP_PREPROCESS -eq 0 ]]; then
   echo ""
   echo "=== Step 1/3: Preprocessing (MIDI → token sequences) ==="
-  python src/preprocessing.py
+  python -m src.preprocessing
 else
   echo "Skipping preprocessing (--skip-preprocess)."
   if [[ ! -f data/processed/vocabulary.json ]]; then
@@ -87,7 +87,7 @@ fi
 # ── Training ──────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Step 2/3: Training ==="
-python src/train.py $SEED $FAST_FLAG
+python -m src.train $SEED $FAST_FLAG
 
 # ── Generation ────────────────────────────────────────────────────────────────
 MODEL="outputs/models/best_model.keras"
@@ -101,7 +101,7 @@ OUTPUT="outputs/midi/generated_${TIMESTAMP}.midi"
 
 echo ""
 echo "=== Step 3/3: Generating MIDI ==="
-python src/generate.py \
+python -m src.generate \
   --model "$MODEL" \
   --output "$OUTPUT" \
   --vocab data/processed/vocabulary.json \
