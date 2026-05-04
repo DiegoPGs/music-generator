@@ -52,7 +52,8 @@ def build_model(
 
     x = tf.keras.layers.LSTM(lstm_units, return_sequences=False, name=f"lstm_{num_lstm_layers}")(x)
     x = tf.keras.layers.Dropout(dropout_rate, name="dropout")(x)
-    outputs = tf.keras.layers.Dense(vocab_size, activation="softmax", name="output")(x)
+    # dtype='float32' keeps logits/softmax in full precision under mixed_float16 policy.
+    outputs = tf.keras.layers.Dense(vocab_size, activation="softmax", dtype="float32", name="output")(x)
 
     model = tf.keras.Model(inputs=inputs, outputs=outputs, name="lstm_music_generator")
     _log_summary(model)

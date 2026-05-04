@@ -171,3 +171,32 @@ class TestParameterCount:
         one = _small_model(num_lstm_layers=1)
         two = _small_model(num_lstm_layers=2)
         assert two.count_params() > one.count_params()
+
+
+# ---------------------------------------------------------------------------
+# Mixed precision
+# ---------------------------------------------------------------------------
+
+
+class TestMixedPrecision:
+    """Output must stay float32 even when global policy is mixed_float16."""
+
+    def test_output_stays_float32_under_mixed_precision(self):
+        prev_policy = tf.keras.mixed_precision.global_policy()
+        try:
+            tf.keras.mixed_precision.set_global_policy("mixed_float16")
+            model = _small_model()
+            out = model(_random_input(), training=False)
+            assert out.dtype == tf.float32
+        finally:
+            tf.keras.mixed_precision.set_global_policy(prev_policy)
+
+    def test_output_layer_has_float32_dtype_under_mixed_precision(self):
+        prev_policy = tf.keras.mixed_precision.global_policy()
+        try:
+            tf.keras.mixed_precision.set_global_policy("mixed_float16")
+            model = _small_model()
+            output_layer = model.get_layer("output")
+            assert output_layer.dtype == "float32"
+        finally:
+            tf.keras.mixed_precision.set_global_policy(prev_policy)

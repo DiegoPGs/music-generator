@@ -4,6 +4,7 @@
 #   ./run_pipeline.sh                        # full run, default settings
 #   ./run_pipeline.sh --skip-preprocess      # skip tokenization if already done
 #   ./run_pipeline.sh --temperature 0.8 --length 1024
+#   ./run_pipeline.sh --fast                 # quick smoke run (small subset, few epochs)
 
 set -euo pipefail
 
@@ -12,6 +13,7 @@ SKIP_PREPROCESS=0
 TEMPERATURE=1.0
 LENGTH=512
 SEED=""
+FAST_FLAG=""
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -20,6 +22,9 @@ while [[ $# -gt 0 ]]; do
     --temperature)     TEMPERATURE="$2"; shift 2 ;;
     --length)          LENGTH="$2"; shift 2 ;;
     --seed)            SEED="--seed $2"; shift 2 ;;
+    --fast)
+        FAST_FLAG="--max-files 100 --steps-per-epoch 100 --validation-steps 20 --epochs 10"
+        shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -82,7 +87,7 @@ fi
 # ── Training ──────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Step 2/3: Training ==="
-python src/train.py $SEED
+python src/train.py $SEED $FAST_FLAG
 
 # ── Generation ────────────────────────────────────────────────────────────────
 MODEL="outputs/models/best_model.keras"

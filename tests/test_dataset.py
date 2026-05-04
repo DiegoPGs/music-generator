@@ -105,6 +105,68 @@ class TestGetSequencePaths:
         paths = get_sequence_paths("train", csv_path=csv_path, sequences_dir=str(tmp_path / "sequences"))
         assert paths == sorted(paths)
 
+    def test_max_files_truncates_result(self, tmp_path):
+        seq_dir = tmp_path / "sequences" / "2004"
+        seq_dir.mkdir(parents=True)
+        for name in ["a.npy", "b.npy", "c.npy", "d.npy", "e.npy"]:
+            (seq_dir / name).touch()
+
+        csv_path = str(tmp_path / "meta.csv")
+        make_csv(csv_path, [
+            {**_BASE_ROW, "midi_filename": f"2004/{n}.midi", "split": "train"}
+            for n in ["a", "b", "c", "d", "e"]
+        ])
+
+        paths = get_sequence_paths(
+            "train",
+            csv_path=csv_path,
+            sequences_dir=str(tmp_path / "sequences"),
+            max_files=2,
+        )
+        assert len(paths) == 2
+        # Must remain sorted: 'a' and 'b' come before 'c', 'd', 'e'
+        assert paths == sorted(paths)
+
+    def test_max_files_none_returns_all(self, tmp_path):
+        seq_dir = tmp_path / "sequences" / "2004"
+        seq_dir.mkdir(parents=True)
+        for name in ["a.npy", "b.npy", "c.npy"]:
+            (seq_dir / name).touch()
+
+        csv_path = str(tmp_path / "meta.csv")
+        make_csv(csv_path, [
+            {**_BASE_ROW, "midi_filename": f"2004/{n}.midi", "split": "train"}
+            for n in ["a", "b", "c"]
+        ])
+
+        paths = get_sequence_paths(
+            "train",
+            csv_path=csv_path,
+            sequences_dir=str(tmp_path / "sequences"),
+            max_files=None,
+        )
+        assert len(paths) == 3
+
+    def test_max_files_larger_than_available(self, tmp_path):
+        seq_dir = tmp_path / "sequences" / "2004"
+        seq_dir.mkdir(parents=True)
+        for name in ["a.npy", "b.npy"]:
+            (seq_dir / name).touch()
+
+        csv_path = str(tmp_path / "meta.csv")
+        make_csv(csv_path, [
+            {**_BASE_ROW, "midi_filename": f"2004/{n}.midi", "split": "train"}
+            for n in ["a", "b"]
+        ])
+
+        paths = get_sequence_paths(
+            "train",
+            csv_path=csv_path,
+            sequences_dir=str(tmp_path / "sequences"),
+            max_files=10,
+        )
+        assert len(paths) == 2
+
 
 # ---------------------------------------------------------------------------
 # build_dataset

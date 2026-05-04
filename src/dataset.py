@@ -17,6 +17,7 @@ def get_sequence_paths(
     split: str,
     csv_path: str = config.MAESTRO_CSV,
     sequences_dir: str = config.SEQUENCES_DIR,
+    max_files: Optional[int] = None,
 ) -> List[str]:
     """Return .npy file paths for the requested MAESTRO split.
 
@@ -24,6 +25,8 @@ def get_sequence_paths(
         split: One of 'train', 'validation', or 'test'.
         csv_path: Path to MAESTRO metadata CSV.
         sequences_dir: Root directory of preprocessed .npy sequence files.
+        max_files: If set, truncate the sorted result to this many files
+            (for fast-iteration experiments). None = no truncation.
 
     Returns:
         Sorted list of .npy paths that exist on disk for the given split.
@@ -44,7 +47,12 @@ def get_sequence_paths(
     if missing:
         logger.warning("%d / %d files missing for split '%s'", missing, len(split_df), split)
     logger.info("Found %d sequence files for split '%s'", len(paths), split)
-    return sorted(paths)
+
+    sorted_paths = sorted(paths)
+    if max_files is not None and len(sorted_paths) > max_files:
+        logger.info("Limiting to %d / %d files for split '%s'", max_files, len(sorted_paths), split)
+        sorted_paths = sorted_paths[:max_files]
+    return sorted_paths
 
 
 def build_dataset(

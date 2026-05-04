@@ -340,3 +340,34 @@ The codebase is ready for a real training run on the MAESTRO v3.0.0 dataset:
 3. Run `python -m src.train` (or `python src/train.py`) to train the model
 4. Run `python src/generate.py --model outputs/models/best_model.keras --output outputs/midi/gen.midi`
 - Never commit model checkpoints — `outputs/models/` is gitignored
+
+## Training Optimization Notes
+
+### Fast iteration mode
+
+For quick experiments during development, use the `--fast` flag:
+
+```bash
+./run_pipeline.sh --fast
+```
+
+This limits training to 100 files, 100 steps/epoch, 20 validation steps, and 10 epochs. A full training run on the complete MAESTRO dataset should use the defaults (no `--fast` flag).
+
+### Key performance levers
+
+| Lever | Flag / Config | Default | Fast mode |
+|-------|--------------|---------|-----------|
+| Window shift | `DATASET_WINDOW_SHIFT` in config.py | 16 | 16 |
+| Max files | `--max-files` | all | 100 |
+| Steps per epoch | `--steps-per-epoch` | all | 100 |
+| Mixed precision | `--mixed-precision` | off | off (enable manually if GPU supports it) |
+| Batch size | `--batch-size` | 64 | 64 |
+| Architecture | `--lstm-units` / `--num-layers` | 512 / 2 | 512 / 2 |
+
+### Mixed precision
+
+Enable with `--mixed-precision` when training on GPUs with float16 tensor cores (NVIDIA Ampere+). This roughly halves training time. Do NOT use on CPU — it will be slower.
+
+### TFRecords (future optimization)
+
+The current pipeline uses `tf.numpy_function` to load `.npy` files, which has Python-to-TF overhead. Converting to TFRecords would improve I/O throughput for very large runs but adds preprocessing complexity. Not implemented yet.
