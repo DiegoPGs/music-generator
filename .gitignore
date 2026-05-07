@@ -3,8 +3,6 @@ data/raw/
 data/processed/
 
 # Model outputs
-outputs/midi/
-outputs/logs/
 
 # Python
 __pycache__/
