@@ -1,6 +1,5 @@
 # Data (large files, not tracked)
 data/raw/
-data/processed/
 
 # Model outputs
 
