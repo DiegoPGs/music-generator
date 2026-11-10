@@ -38,6 +38,14 @@ NUM_LSTM_LAYERS = 2
 DROPOUT_RATE = 0.3
 EARLY_STOPPING_PATIENCE = 5
 
+# Academic training demonstration & diagnostics
+TRAINING_DEMO_CONTEXT_TOKENS = 5  # trailing input tokens shown in pipeline walkthrough
+TRAINING_TOP_K_PREDICTIONS = 3    # top-k predicted tokens shown per epoch
+TRAINING_BAR_WIDTH = 20           # character width for ASCII distribution bars
+MAX_EXP_LOSS = 20.0               # upper bound on loss before exp() to prevent overflow
+MIDI_NOTES_PER_OCTAVE = 12        # semitones per octave for pitch-to-note formatting
+MIDI_OCTAVE_OFFSET = 1            # scientific pitch notation offset (pitch 60 = C4)
+
 # Generation
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_GENERATION_LENGTH = 512

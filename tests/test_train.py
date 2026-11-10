@@ -1,12 +1,19 @@
 """Tests for src/train.py."""
 
+import math
 import os
 
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from src.model import build_model
-from src.train import build_callbacks, prepare_for_training, set_seeds, train
+from src.train import (AcademicTrainingCallback, build_callbacks,
+                       categorize_token_id, compute_layer_weight_stats,
+                       compute_musical_domain_insights,
+                       compute_sample_gradient_norms, describe_token,
+                       inspect_pipeline_sample, prepare_for_training,
+                       set_seeds, summarize_model_layers, train)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,14 +91,142 @@ class TestPrepareForTraining:
 
 
 # ---------------------------------------------------------------------------
+# Token Formatting & Categorization
+# ---------------------------------------------------------------------------
+
+
+class TestTokenDescriptionsAndCategories:
+    def test_describe_note_on_includes_pitch_name(self):
+        desc = describe_token(60)
+        assert "NOTE_ON_60" in desc
+        assert "C4" in desc
+
+    def test_describe_note_off_includes_pitch_name(self):
+        desc = describe_token(128 + 69)
+        assert "NOTE_OFF_69" in desc
+        assert "A4" in desc
+
+    def test_describe_time_shift_includes_milliseconds(self):
+        desc = describe_token(256 + 9)  # TIME_SHIFT_10
+        assert "TIME_SHIFT_10" in desc
+        assert "100ms" in desc
+
+    def test_describe_set_velocity_includes_velocity_estimate(self):
+        desc = describe_token(356)  # SET_VELOCITY_0
+        assert "SET_VELOCITY_0" in desc
+        assert "vel~" in desc
+
+    def test_describe_unknown_token_fallback(self):
+        desc = describe_token(9999, inv_vocab={})
+        assert desc == "TOKEN_9999"
+
+    def test_categorize_token_ids(self):
+        assert categorize_token_id(0) == "NOTE_ON"
+        assert categorize_token_id(128) == "NOTE_OFF"
+        assert categorize_token_id(256) == "TIME_SHIFT"
+        assert categorize_token_id(356) == "SET_VELOCITY"
+        assert categorize_token_id(999, inv_vocab={}) == "OTHER"
+
+
+# ---------------------------------------------------------------------------
+# Academic Walkthrough & Diagnostic Helpers
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineInspection:
+    def test_inspect_pipeline_sample_metadata(self):
+        raw_ds = _tiny_dataset()
+        prep_ds = prepare_for_training(raw_ds)
+        info = inspect_pipeline_sample(raw_ds, prep_ds, context_tokens=3)
+
+        assert info is not None
+        assert info["batch_size"] == _BATCH
+        assert info["seq_len"] == _SEQ
+        assert info["tokens_per_batch"] == _BATCH * _SEQ
+        assert info["raw_input_shape"] == (_BATCH, _SEQ)
+        assert info["raw_target_shape"] == (_BATCH, _SEQ)
+        assert info["prepared_input_shape"] == (_BATCH, _SEQ)
+        assert info["prepared_target_shape"] == (_BATCH,)
+        assert len(info["sample_context_ids"]) == 3
+        assert len(info["sample_context_descriptions"]) == 3
+        assert isinstance(info["sample_target_id"], int)
+        assert isinstance(info["sample_target_description"], str)
+
+    def test_inspect_empty_dataset_returns_none(self):
+        empty_ds = tf.data.Dataset.from_tensor_slices(
+            (tf.zeros((0, _BATCH, _SEQ), dtype=tf.int32), tf.zeros((0, _BATCH, _SEQ), dtype=tf.int32))
+        )
+        prep_ds = prepare_for_training(empty_ds)
+        assert inspect_pipeline_sample(empty_ds, prep_ds) is None
+
+
+class TestModelDiagnostics:
+    def test_summarize_model_layers(self):
+        model = _small_model()
+        layers_info = summarize_model_layers(model)
+        assert len(layers_info) == len(model.layers)
+        total_pct = sum(item["pct_params"] for item in layers_info)
+        assert total_pct == pytest.approx(100.0, abs=1e-3)
+        assert all("role" in item and item["role"] for item in layers_info)
+
+    def test_compute_layer_weight_stats_tracks_updates(self):
+        model = _small_model()
+        initial_stats, snapshot = compute_layer_weight_stats(model)
+        assert len(initial_stats) > 0
+        assert all(item["update_l2"] == 0.0 for item in initial_stats)
+
+        # Perturb first trainable weight and verify positive update norm
+        model.trainable_weights[0].assign_add(tf.ones_like(model.trainable_weights[0]) * 0.1)
+        updated_stats, _ = compute_layer_weight_stats(model, prev_weights=snapshot)
+        assert updated_stats[0]["update_l2"] > 0.0
+        assert updated_stats[0]["relative_update"] > 0.0
+
+    def test_compute_sample_gradient_norms(self):
+        model = _small_model()
+        prep_ds = prepare_for_training(_tiny_dataset())
+        sample_batch = next(iter(prep_ds))
+        grad_norms = compute_sample_gradient_norms(model, sample_batch)
+
+        assert "global" in grad_norms
+        assert grad_norms["global"] > 0.0
+        assert "embedding" in grad_norms
+        assert "output" in grad_norms
+
+
+class TestMusicalDomainInsights:
+    def test_musical_domain_insights_structure_and_bounds(self):
+        inv_vocab = {
+            0: "NOTE_ON_60",
+            1: "NOTE_OFF_60",
+            2: "TIME_SHIFT_10",
+            3: "SET_VELOCITY_16",
+            **{i: f"NOTE_ON_{i}" for i in range(4, _VOCAB)},
+        }
+        model = _small_model()
+        prep_ds = prepare_for_training(_tiny_dataset())
+        sample_batch = next(iter(prep_ds))
+
+        insights = compute_musical_domain_insights(model, sample_batch, inv_vocab=inv_vocab, top_k=3)
+        pred_mass = sum(insights["predicted_category_probs"].values())
+        target_share = sum(insights["target_category_shares"].values())
+
+        assert pred_mass == pytest.approx(1.0, abs=1e-4)
+        assert target_share == pytest.approx(1.0, abs=1e-4)
+        assert 0.0 <= insights["mean_entropy"] <= insights["max_entropy"] + 1e-4
+        assert insights["max_entropy"] == pytest.approx(math.log(_VOCAB), abs=1e-4)
+        assert len(insights["sample_top_k"]) == 3
+        assert 0.0 <= insights["mean_top1_confidence"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
 # build_callbacks
 # ---------------------------------------------------------------------------
 
 
 class TestBuildCallbacks:
-    def test_returns_three_callbacks(self, tmp_path):
+    def test_returns_four_callbacks(self, tmp_path):
         cbs = build_callbacks(str(tmp_path / "models"), str(tmp_path / "logs"), patience=3)
-        assert len(cbs) == 3
+        assert len(cbs) == 4
 
     def test_has_model_checkpoint(self, tmp_path):
         cbs = build_callbacks(str(tmp_path / "models"), str(tmp_path / "logs"), patience=3)
@@ -107,6 +242,11 @@ class TestBuildCallbacks:
         cbs = build_callbacks(str(tmp_path / "models"), str(tmp_path / "logs"), patience=3)
         types = [type(c) for c in cbs]
         assert tf.keras.callbacks.TensorBoard in types
+
+    def test_has_academic_training_callback(self, tmp_path):
+        cbs = build_callbacks(str(tmp_path / "models"), str(tmp_path / "logs"), patience=3)
+        types = [type(c) for c in cbs]
+        assert AcademicTrainingCallback in types
 
     def test_early_stopping_patience(self, tmp_path):
         cbs = build_callbacks(str(tmp_path / "models"), str(tmp_path / "logs"), patience=7)
@@ -135,6 +275,68 @@ class TestBuildCallbacks:
 
 
 # ---------------------------------------------------------------------------
+# AcademicTrainingCallback
+# ---------------------------------------------------------------------------
+
+
+class TestAcademicTrainingCallback:
+    def test_records_epoch_diagnostics_during_fit(self):
+        model = _small_model()
+        model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+        prep_ds = prepare_for_training(_tiny_dataset())
+        sample_batch = next(iter(prep_ds))
+
+        cb = AcademicTrainingCallback(
+            total_epochs=2,
+            batch_size=_BATCH,
+            seq_len=_SEQ,
+            steps_per_epoch=2,
+            patience=3,
+            sample_batch=sample_batch,
+            enable_progress_bar=False,
+        )
+        model.fit(prep_ds, validation_data=prep_ds, epochs=2, steps_per_epoch=2, validation_steps=1,
+                  callbacks=[cb], verbose=0)
+
+        assert len(cb.epoch_records) == 2
+        first = cb.epoch_records[0]
+        assert first["epoch"] == 1
+        assert first["train_ppl"] == pytest.approx(math.exp(first["train_loss"]), rel=1e-4)
+        assert first["val_ppl"] == pytest.approx(math.exp(first["val_loss"]), rel=1e-4)
+        assert first["tokens_per_sec"] > 0.0
+        assert len(first["weight_stats"]) > 0
+        assert "global" in first["grad_norms"]
+        assert first["musical_insights"] is not None
+
+    def test_logs_all_four_academic_stages_cleanly(self, tmp_path, caplog):
+        import logging
+
+        model = _small_model()
+        ds = _tiny_dataset()
+        with caplog.at_level(logging.INFO, logger="src.train"):
+            train(
+                model,
+                ds,
+                ds,
+                epochs=2,
+                learning_rate=0.01,
+                model_dir=str(tmp_path / "models"),
+                log_dir=str(tmp_path / "logs"),
+                patience=3,
+                steps_per_epoch=2,
+                validation_steps=1,
+                enable_progress_bar=False,
+            )
+
+        assert "STAGE 1/4 — DATA & TENSOR PIPELINE WALKTHROUGH" in caplog.text
+        assert "STAGE 2/4 — MODEL ARCHITECTURE & THEORETICAL BASELINES" in caplog.text
+        assert "STAGE 3/4 — ITERATIVE OPTIMIZATION" in caplog.text
+        assert "EPOCH 01/02 SUMMARY" in caplog.text
+        assert "EPOCH 02/02 SUMMARY" in caplog.text
+        assert "STAGE 4/4 — POST-TRAINING ACADEMIC SUMMARY" in caplog.text
+
+
+# ---------------------------------------------------------------------------
 # train
 # ---------------------------------------------------------------------------
 
@@ -151,6 +353,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         assert isinstance(history, tf.keras.callbacks.History)
 
@@ -165,6 +368,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         assert "loss" in history.history
         assert "val_loss" in history.history
@@ -182,6 +386,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         assert os.path.exists(os.path.join(model_dir, "best_model.keras"))
 
@@ -197,6 +402,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         loaded = tf.keras.models.load_model(os.path.join(model_dir, "best_model.keras"))
         assert isinstance(loaded, tf.keras.Model)
@@ -213,6 +419,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         loaded = tf.keras.models.load_model(os.path.join(model_dir, "best_model.keras"))
         out = loaded(tf.constant([[1, 2, 3]], dtype=tf.int32), training=False)
@@ -235,6 +442,7 @@ class TestTrain:
             patience=20,  # disable early stopping for this test
             steps_per_epoch=4,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         losses = history.history["loss"]
         assert losses[-1] < losses[0], f"Loss did not decrease: {losses[0]:.4f} → {losses[-1]:.4f}"
@@ -251,6 +459,7 @@ class TestTrain:
             patience=3,
             steps_per_epoch=2,
             validation_steps=1,
+            enable_progress_bar=False,
         )
         fit_dir = os.path.join(log_dir, "fit")
         assert os.path.isdir(fit_dir)
