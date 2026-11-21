@@ -41,16 +41,16 @@ def get_sequence_paths(
         if os.path.exists(npy_path):
             paths.append(npy_path)
         else:
-            logger.warning("Sequence file not found (run preprocessing): %s", npy_path)
+            logger.warning("No se encontró la secuencia (¿falta correr el preprocesamiento?): %s", npy_path)
             missing += 1
 
     if missing:
-        logger.warning("%d / %d files missing for split '%s'", missing, len(split_df), split)
-    logger.info("Found %d sequence files for split '%s'", len(paths), split)
+        logger.warning("Faltan %d de %d archivos del conjunto '%s'", missing, len(split_df), split)
+    logger.info("Conjunto '%s': %d piezas preprocesadas encontradas", split, len(paths))
 
     sorted_paths = sorted(paths)
     if max_files is not None and len(sorted_paths) > max_files:
-        logger.info("Limiting to %d / %d files for split '%s'", max_files, len(sorted_paths), split)
+        logger.info("Conjunto '%s': se usarán solo %d de %d piezas (--max-files)", split, max_files, len(sorted_paths))
         sorted_paths = sorted_paths[:max_files]
     return sorted_paths
 

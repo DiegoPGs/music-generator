@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -12,6 +13,7 @@ import pretty_midi
 from tqdm import tqdm
 
 import config
+from src.console import format_duration, section, setup_cli_logging
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def save_vocabulary(vocab: Dict[str, int], path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         json.dump(vocab, f)
-    logger.info("Saved vocabulary (%d tokens) to %s", len(vocab), path)
+    logger.info("  Vocabulario guardado: %d tipos de evento posibles → %s", len(vocab), path)
 
 
 def load_vocabulary(path: str) -> Tuple[Dict[str, int], Dict[int, str]]:
@@ -312,12 +314,12 @@ def process_dataset(
     vocab_path: str = config.VOCAB_PATH,
     output_dir: str = config.SEQUENCES_DIR,
     splits: Optional[List[str]] = None,
-) -> None:
+) -> Dict[str, int]:
     """Tokenize all MAESTRO MIDI files and save as int32 numpy arrays.
 
     Files are processed one at a time to avoid loading the full dataset into memory.
     Output mirrors the MAESTRO directory structure under output_dir, replacing
-    .midi extensions with .npy.
+    .midi extensions with .npy. Progress and a final summary are logged in Spanish.
 
     Args:
         csv_path: Path to the MAESTRO metadata CSV.
@@ -325,19 +327,32 @@ def process_dataset(
         vocab_path: Path to save the vocabulary JSON.
         output_dir: Root directory for output .npy sequence files.
         splits: Splits to process. Defaults to all three (train, validation, test).
+
+    Returns:
+        Dict with 'ok' (files processed), 'errors' (files that failed), and
+        'total_tokens' (events written across all files).
     """
     if splits is None:
         splits = ["train", "validation", "test"]
+
+    section(logger, "PREPROCESAMIENTO: MIDI → SECUENCIAS DE EVENTOS")
+    logger.info("  Cada archivo MIDI se convierte en una lista de eventos que el modelo puede leer:")
+    logger.info("  tocar nota, soltar nota, esperar (en pasos de %d ms) y cambiar intensidad.",
+                config.TIME_SHIFT_MS_PER_BIN)
+    logger.info("  El pedal de sustain se aplica alargando la duración de las notas.")
 
     vocab = build_vocabulary()
     save_vocabulary(vocab, vocab_path)
 
     df = pd.read_csv(csv_path)
     df = df[df["split"].isin(splits)].reset_index(drop=True)
-    logger.info("Processing %d files across splits: %s", len(df), splits)
+    per_split = df["split"].value_counts().to_dict()
+    logger.info("  Piezas a procesar: %d (%s)", len(df),
+                ", ".join(f"{split}: {per_split.get(split, 0)}" for split in splits))
 
-    ok, errors = 0, 0
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Preprocessing MIDI"):
+    start_time = time.perf_counter()
+    ok, errors, total_tokens = 0, 0, 0
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Tokenizando archivos MIDI", unit=" archivos"):
         midi_path = os.path.join(base_dir, row["midi_filename"])
         rel = os.path.splitext(row["midi_filename"])[0] + ".npy"
         out_path = os.path.join(output_dir, rel)
@@ -347,13 +362,26 @@ def process_dataset(
             token_ids = events_to_tokens(midi_to_events(midi_path), vocab)
             np.save(out_path, token_ids)
             ok += 1
+            total_tokens += int(len(token_ids))
         except Exception as exc:
-            logger.error("Failed: %s — %s", row["midi_filename"], exc)
+            logger.error("No se pudo procesar %s — %s", row["midi_filename"], exc)
             errors += 1
 
-    logger.info("Done. %d processed, %d errors.", ok, errors)
+    elapsed = time.perf_counter() - start_time
+    section(logger, "RESUMEN DEL PREPROCESAMIENTO")
+    logger.info("  Piezas convertidas     : %d", ok)
+    error_hint = " (revisa los mensajes de ERROR de arriba)" if errors else ""
+    logger.info("  Piezas con error       : %d%s", errors, error_hint)
+    logger.info("  Eventos generados      : %s", f"{total_tokens:,}")
+    if ok:
+        logger.info("  Promedio por pieza     : %s eventos", f"{total_tokens // ok:,}")
+    logger.info("  Tiempo total           : %s", format_duration(elapsed))
+    logger.info("  Secuencias guardadas en: %s", output_dir)
+    logger.info("  Siguiente paso: python -m src.train")
+
+    return {"ok": ok, "errors": errors, "total_tokens": total_tokens}
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    setup_cli_logging()
     process_dataset()

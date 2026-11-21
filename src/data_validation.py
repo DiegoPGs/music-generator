@@ -15,6 +15,7 @@ import seaborn as sns  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
 import config  # noqa: E402
+from src.console import section, setup_cli_logging  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,9 @@ def load_metadata(csv_path: str) -> pd.DataFrame:
 
     unexpected_splits = set(df["split"].unique()) - _VALID_SPLITS
     if unexpected_splits:
-        logger.warning("Unexpected split values: %s", unexpected_splits)
+        logger.warning("Valores de split inesperados en el CSV: %s", unexpected_splits)
 
-    logger.info("Loaded metadata: %d rows, splits=%s", len(df), df["split"].value_counts().to_dict())
+    logger.info("Metadatos cargados: %d piezas · por conjunto: %s", len(df), df["split"].value_counts().to_dict())
     return df
 
 
@@ -75,7 +76,7 @@ def extract_midi_stats(midi_path: str) -> Dict:
         note_count = len(notes)
 
         if note_count == 0:
-            logger.warning("No notes in %s", midi_path)
+            logger.warning("El archivo no contiene notas: %s", midi_path)
             return {**null_result, "duration": duration, "note_count": 0, "parse_error": False}
 
         pitches = [n.pitch for n in notes]
@@ -96,7 +97,7 @@ def extract_midi_stats(midi_path: str) -> Dict:
             "parse_error": False,
         }
     except Exception as exc:
-        logger.error("Failed to parse %s: %s", midi_path, exc)
+        logger.error("No se pudo leer %s: %s", midi_path, exc)
         return null_result
 
 
@@ -113,10 +114,10 @@ def build_stats_dataframe(df: pd.DataFrame, base_dir: str) -> pd.DataFrame:
         with the CSV 'duration' column (audio file duration).
     """
     rows = []
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting MIDI stats"):
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Analizando archivos MIDI"):
         midi_path = os.path.join(base_dir, row["midi_filename"])
         if not os.path.exists(midi_path):
-            logger.warning("MIDI not found on disk: %s", midi_path)
+            logger.warning("No se encontró el MIDI en disco: %s", midi_path)
             null_keys = [
                 "duration_computed", "note_count", "min_pitch", "max_pitch",
                 "pitch_range", "mean_velocity", "std_velocity",
@@ -176,7 +177,7 @@ def flag_outliers(stats_df: pd.DataFrame) -> pd.DataFrame:
     df.loc[empty_mask, "outlier_reasons"] += "no_notes; "
 
     n = df["is_outlier"].sum()
-    logger.info("Flagged %d / %d outliers (%.1f%%)", n, len(df), 100 * n / len(df))
+    logger.info("Piezas atípicas detectadas: %d de %d (%.1f%%)", n, len(df), 100 * n / len(df))
     return df
 
 
@@ -193,13 +194,13 @@ def validate_splits(df: pd.DataFrame) -> Dict:
     total = len(df)
     proportions = {k: v / total for k, v in counts.items()}
 
-    logger.info("Split proportions: %s", {k: f"{v:.1%}" for k, v in proportions.items()})
+    logger.info("Proporción por conjunto: %s", {k: f"{v:.1%}" for k, v in proportions.items()})
 
     expected = {"train": 0.75, "validation": 0.10, "test": 0.14}
     for split, exp in expected.items():
         if split in proportions and abs(proportions[split] - exp) > 0.05:
             logger.warning(
-                "Split '%s' is %.1f%% (expected ~%.1f%%)",
+                "El conjunto '%s' representa %.1f%% (se esperaba ~%.1f%%)",
                 split, proportions[split] * 100, exp * 100,
             )
 
@@ -234,7 +235,7 @@ def plot_distributions(stats_df: pd.DataFrame, output_dir: str) -> None:
         ax.set_title(f"MAESTRO v3 — {xlabel} (n={len(valid)})")
         fig.savefig(os.path.join(output_dir, filename), dpi=120, bbox_inches="tight")
         plt.close(fig)
-        logger.info("Saved: %s/%s", output_dir, filename)
+        logger.info("Gráfica guardada: %s/%s", output_dir, filename)
 
     # Pitch coverage: count how many files include each MIDI pitch in their range
     pitch_counts = _aggregate_pitch_coverage(valid)
@@ -245,7 +246,7 @@ def plot_distributions(stats_df: pd.DataFrame, output_dir: str) -> None:
     ax.set_title(f"MAESTRO v3 — Pitch Coverage (n={len(valid)})")
     fig.savefig(os.path.join(output_dir, "pitch_coverage.png"), dpi=120, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Saved: %s/pitch_coverage.png", output_dir)
+    logger.info("Gráfica guardada: %s/pitch_coverage.png", output_dir)
 
 
 def _aggregate_pitch_coverage(stats_df: pd.DataFrame) -> np.ndarray:
@@ -275,7 +276,9 @@ def run_validation(
     Returns:
         Annotated DataFrame with per-file stats and outlier flags.
     """
-    logger.info("=== MAESTRO Data Validation ===")
+    section(logger, "VALIDACIÓN DEL DATASET MAESTRO")
+    logger.info("  Se revisa que cada archivo MIDI exista y se pueda leer, se calculan estadísticas")
+    logger.info("  por pieza (duración, notas, intensidad) y se marcan las piezas atípicas.")
 
     df = load_metadata(csv_path)
     split_info = validate_splits(df)
@@ -285,16 +288,21 @@ def run_validation(
 
     n_errors = int(stats_df["parse_error"].fillna(True).sum())
     n_outliers = int(stats_df["is_outlier"].sum())
-    logger.info("=== Summary ===")
-    logger.info("Total: %d | Parse errors: %d | Outliers: %d (%.1f%%)",
-                len(stats_df), n_errors, n_outliers, 100 * n_outliers / len(stats_df))
-    logger.info("Splits: %s", split_info["counts"])
+    section(logger, "RESUMEN DE LA VALIDACIÓN")
+    logger.info("  Piezas revisadas      : %d", len(stats_df))
+    logger.info("  Archivos con error    : %d", n_errors)
+    logger.info("  Piezas atípicas       : %d (%.1f%%) — muy cortas/largas o con rangos inusuales",
+                n_outliers, 100 * n_outliers / len(stats_df))
+    logger.info("  Piezas por conjunto   : %s", split_info["counts"])
+    logger.info("  Gráficas guardadas en : %s", plots_dir)
 
     return stats_df
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    setup_cli_logging()
     results = run_validation()
     outliers = results[results["is_outlier"]][["midi_filename", "outlier_reasons"]]
+    logger.info("")
+    logger.info("Piezas atípicas (archivo y motivo):")
     print(outliers.to_string())

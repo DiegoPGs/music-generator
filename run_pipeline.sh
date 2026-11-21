@@ -5,6 +5,7 @@
 #   ./run_pipeline.sh --skip-preprocess      # skip tokenization if already done
 #   ./run_pipeline.sh --temperature 0.8 --length 1024
 #   ./run_pipeline.sh --fast                 # quick smoke run (small subset, few epochs)
+#   ./run_pipeline.sh --verbose              # also show technical training diagnostics
 
 set -euo pipefail
 
@@ -14,6 +15,10 @@ TEMPERATURE=1.0
 LENGTH=512
 SEED=""
 FAST_FLAG=""
+VERBOSE_FLAG=""
+
+# Hide TensorFlow's internal C++ INFO/WARNING logs so the narrated report stays readable.
+export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-2}"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -22,12 +27,22 @@ while [[ $# -gt 0 ]]; do
     --temperature)     TEMPERATURE="$2"; shift 2 ;;
     --length)          LENGTH="$2"; shift 2 ;;
     --seed)            SEED="--seed $2"; shift 2 ;;
+    --verbose)         VERBOSE_FLAG="--verbose"; shift ;;
     --fast)
         FAST_FLAG="--max-files 100 --steps-per-epoch 100 --validation-steps 20 --epochs 10"
         shift ;;
-    *) echo "Unknown argument: $1"; exit 1 ;;
+    *) echo "Argumento desconocido: $1"; exit 1 ;;
   esac
 done
+
+step_header() {
+  # $1 = step label, $2 = one-line explanation
+  echo ""
+  echo "################################################################################"
+  echo "# $1"
+  echo "# $2"
+  echo "################################################################################"
+}
 
 # ── Python detection ──────────────────────────────────────────────────────────
 for PY in python3.10 python3.11 python3 python; do
@@ -42,20 +57,23 @@ for PY in python3.10 python3.11 python3 python; do
 done
 
 if [[ -z "${PYTHON:-}" ]]; then
-  echo "ERROR: No compatible Python (3.8–3.11) found. TensorFlow requires Python ≤ 3.11."
-  echo "Install Python 3.10 or 3.11 and re-run."
+  echo "ERROR: No se encontró un Python compatible (3.8–3.11). TensorFlow requiere Python ≤ 3.11."
+  echo "Instala Python 3.10 o 3.11 y vuelve a ejecutar."
   exit 1
 fi
-echo "Using Python: $PYTHON ($VER)"
+echo "Python: $PYTHON ($VER)"
+if [[ -n "$FAST_FLAG" ]]; then
+  echo "Modo rápido (--fast): 100 piezas, 100 lotes por época, hasta 10 épocas. Útil para probar, no para un modelo final."
+fi
 
 # ── Virtual environment ───────────────────────────────────────────────────────
 if [[ ! -d venv ]]; then
-  echo "Creating virtual environment..."
+  echo "Creando entorno virtual (venv)..."
   "$PYTHON" -m venv venv
 fi
 source venv/bin/activate
 
-echo "Installing dependencies..."
+echo "Instalando dependencias (puede tardar la primera vez)..."
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
@@ -65,49 +83,54 @@ mkdir -p data/raw data/processed/sequences outputs/models outputs/midi outputs/l
 # ── Dataset check ─────────────────────────────────────────────────────────────
 MAESTRO_CSV="data/raw/maestro-v3.0.0/maestro-v3.0.0.csv"
 if [[ ! -f "$MAESTRO_CSV" ]]; then
-  echo "ERROR: MAESTRO dataset not found at $MAESTRO_CSV"
-  echo "Place the extracted maestro-v3.0.0 folder under data/raw/ and re-run."
+  echo "ERROR: No se encontró el dataset MAESTRO en $MAESTRO_CSV"
+  echo "Coloca la carpeta extraída maestro-v3.0.0 dentro de data/raw/ y vuelve a ejecutar."
   exit 1
 fi
-echo "MAESTRO dataset found."
+echo "Dataset MAESTRO encontrado."
 
 # ── Preprocessing ─────────────────────────────────────────────────────────────
 if [[ $SKIP_PREPROCESS -eq 0 ]]; then
-  echo ""
-  echo "=== Step 1/3: Preprocessing (MIDI → token sequences) ==="
+  step_header "PASO 1/3 · Preprocesamiento (MIDI → secuencias de eventos)" \
+              "Convierte cada interpretación de piano en una lista de eventos que el modelo puede leer."
   python -m src.preprocessing
 else
-  echo "Skipping preprocessing (--skip-preprocess)."
+  echo "Se omite el preprocesamiento (--skip-preprocess)."
   if [[ ! -f data/processed/vocabulary.json ]]; then
-    echo "ERROR: data/processed/vocabulary.json missing. Run without --skip-preprocess first."
+    echo "ERROR: Falta data/processed/vocabulary.json. Ejecuta primero sin --skip-preprocess."
     exit 1
   fi
 fi
 
 # ── Training ──────────────────────────────────────────────────────────────────
-echo ""
-echo "=== Step 2/3: Training ==="
-python -m src.train $SEED $FAST_FLAG
+step_header "PASO 2/3 · Entrenamiento del modelo LSTM" \
+            "El modelo aprende a predecir el siguiente evento musical; verás su progreso época por época."
+python -m src.train $SEED $FAST_FLAG $VERBOSE_FLAG
 
 # ── Generation ────────────────────────────────────────────────────────────────
 MODEL="outputs/models/best_model.keras"
 if [[ ! -f "$MODEL" ]]; then
-  echo "ERROR: Model checkpoint not found at $MODEL. Training may have failed."
+  echo "ERROR: No se encontró el modelo en $MODEL. Es posible que el entrenamiento haya fallado."
   exit 1
 fi
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUTPUT="outputs/midi/generated_${TIMESTAMP}.midi"
 
-echo ""
-echo "=== Step 3/3: Generating MIDI ==="
+step_header "PASO 3/3 · Generación de música" \
+            "El modelo entrenado escribe una pieza nueva, evento por evento, y la guarda como MIDI."
 python -m src.generate \
   --model "$MODEL" \
   --output "$OUTPUT" \
   --vocab data/processed/vocabulary.json \
   --length "$LENGTH" \
   --temperature "$TEMPERATURE" \
-  $SEED
+  $SEED $VERBOSE_FLAG
 
 echo ""
-echo "Done. Output saved to: $OUTPUT"
+echo "################################################################################"
+echo "# Listo."
+echo "#   Modelo entrenado : $MODEL"
+echo "#   Pieza generada   : $OUTPUT"
+echo "#   Curvas (TensorBoard): tensorboard --logdir outputs/logs"
+echo "################################################################################"

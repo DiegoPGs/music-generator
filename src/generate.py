@@ -3,16 +3,21 @@
 import argparse
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
 
 import config
+from src.console import (CATEGORY_LABELS_ES, format_duration,
+                         pitch_to_note_name_es, section, setup_cli_logging)
 from src.preprocessing import events_to_midi, load_vocabulary, midi_to_events
 
 logger = logging.getLogger(__name__)
+
+_MS_PER_SECOND = 1000.0
 
 
 # ── Sampling ──────────────────────────────────────────────────────────────────
@@ -111,13 +116,68 @@ def generate(
 
     token_ids = list(seed_tokens)
 
-    for _ in tqdm(range(length), desc="Generating tokens", leave=False):
+    for _ in tqdm(range(length), desc="Generando eventos", unit=" eventos", leave=False):
         context = token_ids[-seq_len:]
         inp = tf.constant([context], dtype=tf.int32)
         probs = model(inp, training=False).numpy()[0]
         token_ids.append(sample_token(probs, temperature))
 
     return [inv_vocab[t] for t in token_ids]
+
+
+# ── Human-readable summaries ──────────────────────────────────────────────────
+
+
+def describe_temperature(temperature: float) -> str:
+    """Explain in plain Spanish what a sampling temperature will do.
+
+    Args:
+        temperature: Sampling temperature.
+
+    Returns:
+        Short Spanish description of the expected musical behaviour.
+    """
+    if temperature == 0.0:
+        return "determinista: siempre elige el evento más probable (suele volverse repetitivo)"
+    if temperature < config.GENERATION_TEMP_LOW:
+        return "conservadora: elige eventos seguros, música más predecible y repetitiva"
+    if temperature <= config.GENERATION_TEMP_HIGH:
+        return "equilibrada: mezcla coherencia y variedad"
+    return "experimental: más sorpresas, pero también más caos"
+
+
+def summarize_events(events: List[str]) -> Dict[str, Any]:
+    """Compute a musical summary of a generated event sequence.
+
+    Args:
+        events: Event token strings such as 'NOTE_ON_60' or 'TIME_SHIFT_10'.
+
+    Returns:
+        Dict with 'total_events', 'note_count' (NOTE_ON events), 'duration_sec'
+        (sum of TIME_SHIFT steps), 'min_pitch'/'max_pitch' (None if no notes),
+        and 'category_counts' per event family.
+    """
+    category_counts = {cat: 0 for cat in CATEGORY_LABELS_ES}
+    pitches: List[int] = []
+    duration_ms = 0
+    for event in events:
+        for cat in category_counts:
+            if event.startswith(f"{cat}_"):
+                category_counts[cat] += 1
+                break
+        if event.startswith("NOTE_ON_"):
+            pitches.append(int(event[len("NOTE_ON_"):]))
+        elif event.startswith("TIME_SHIFT_"):
+            duration_ms += int(event[len("TIME_SHIFT_"):]) * config.TIME_SHIFT_MS_PER_BIN
+
+    return {
+        "total_events": len(events),
+        "note_count": len(pitches),
+        "duration_sec": duration_ms / _MS_PER_SECOND,
+        "min_pitch": min(pitches) if pitches else None,
+        "max_pitch": max(pitches) if pitches else None,
+        "category_counts": category_counts,
+    }
 
 
 # ── End-to-end pipeline ───────────────────────────────────────────────────────
@@ -143,7 +203,7 @@ def load_model_and_vocab(
         raise FileNotFoundError(f"Model not found: {model_path}")
     model = tf.keras.models.load_model(model_path)
     vocab, inv_vocab = load_vocabulary(vocab_path)
-    logger.info("Loaded model from %s (%d params)", model_path, model.count_params())
+    logger.info("  Modelo cargado: %s (%s parámetros)", model_path, f"{model.count_params():,}")
     return model, vocab, inv_vocab
 
 
@@ -173,20 +233,44 @@ def generate_midi(
     if rng_seed is not None:
         np.random.seed(rng_seed)
 
+    section(logger, "GENERACIÓN DE MÚSICA")
     model, vocab, inv_vocab = load_model_and_vocab(model_path, vocab_path)
 
     if seed_midi_path is not None:
-        logger.info("Using MIDI seed: %s", seed_midi_path)
+        logger.info(
+            "  Semilla: hasta %d eventos finales de %s (la música continuará esa pieza).", seq_len, seed_midi_path
+        )
         seed_tokens = seed_from_midi(seed_midi_path, vocab, seq_len)
     else:
-        logger.info("Using random seed (rng_seed=%s)", rng_seed)
+        seed_desc = f"semilla numérica {rng_seed}" if rng_seed is not None else "sin semilla fija, cambia cada vez"
+        logger.info("  Semilla: %d eventos al azar como punto de partida (%s).", seq_len, seed_desc)
         seed_tokens = seed_from_random(len(vocab), seq_len, rng_seed)
 
-    logger.info("Generating %d tokens at temperature=%.2f", length, temperature)
+    logger.info("  Temperatura %.2f → %s.", temperature, describe_temperature(temperature))
+    logger.info("  El modelo escribirá %d eventos nuevos, uno a la vez, mirando siempre los últimos %d.",
+                length, seq_len)
+    start_time = time.perf_counter()
     events = generate(model, seed_tokens, inv_vocab, length=length, temperature=temperature, seq_len=seq_len)
+    elapsed = time.perf_counter() - start_time
 
     events_to_midi(events, output_path)
-    logger.info("Wrote generated MIDI to %s", output_path)
+
+    summary = summarize_events(events[len(seed_tokens):])
+    section(logger, "RESUMEN DE LA PIEZA GENERADA")
+    logger.info("  Eventos generados : %d en %s", summary["total_events"], format_duration(elapsed))
+    logger.info("  Notas tocadas     : %d", summary["note_count"])
+    logger.info("  Duración aprox.   : %s", format_duration(summary["duration_sec"]))
+    if summary["min_pitch"] is not None:
+        logger.info("  Rango de notas    : %s a %s",
+                    pitch_to_note_name_es(summary["min_pitch"]), pitch_to_note_name_es(summary["max_pitch"]))
+    total = max(summary["total_events"], 1)
+    for cat, label in CATEGORY_LABELS_ES.items():
+        count = summary["category_counts"][cat]
+        logger.info("  %-24s: %5d (%.0f%%)", label, count, 100.0 * count / total)
+    if summary["note_count"] == 0:
+        logger.warning("La pieza no contiene notas. Prueba otra temperatura o un modelo con más entrenamiento.")
+    logger.info("  Archivo MIDI guardado en: %s", output_path)
+    logger.info("  Ábrelo con cualquier reproductor o editor MIDI (p. ej. MuseScore o GarageBand) para escucharlo.")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -202,12 +286,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--seq-len", type=int, default=config.SEQUENCE_LENGTH, dest="seq_len")
     parser.add_argument("--seed-midi", default=None, dest="seed_midi_path", help="MIDI file to seed generation.")
     parser.add_argument("--seed", type=int, default=None, dest="rng_seed", help="Random seed.")
+    parser.add_argument("--verbose", action="store_true", help="Show debug-level details.")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = _parse_args()
+    setup_cli_logging(verbose=args.verbose)
     generate_midi(
         model_path=args.model,
         output_path=args.output,

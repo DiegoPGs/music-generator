@@ -46,9 +46,16 @@ MAX_EXP_LOSS = 20.0               # upper bound on loss before exp() to prevent 
 MIDI_NOTES_PER_OCTAVE = 12        # semitones per octave for pitch-to-note formatting
 MIDI_OCTAVE_OFFSET = 1            # scientific pitch notation offset (pitch 60 = C4)
 
+# Console reporting (human-readable progress messages)
+CONSOLE_WIDTH = 80                # character width of section banners and rules
+TRAINING_PLATEAU_DELTA = 0.005    # val_loss improvement (nats) below which training is "stalled"
+TRAINING_OVERFIT_GAP = 0.15       # val_loss - train_loss gap (nats) flagged as possible overfitting
+
 # Generation
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_GENERATION_LENGTH = 512
+GENERATION_TEMP_LOW = 0.8        # below: conservative / repetitive sampling
+GENERATION_TEMP_HIGH = 1.2       # above: experimental / chaotic sampling
 
 # Fast iteration (set via CLI flags; these are just reference values)
 FAST_MAX_FILES = 100             # use ~100 files for quick experiments

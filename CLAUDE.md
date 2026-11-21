@@ -364,6 +364,10 @@ This limits training to 100 files, 100 steps/epoch, 20 validation steps, and 10 
 | Batch size | `--batch-size` | 64 | 64 |
 | Architecture | `--lstm-units` / `--num-layers` | 512 / 2 | 512 / 2 |
 
+### Console output
+
+All user-facing console messages are in Spanish and go through `logging` (helpers in `src/console.py`; CLI entry points call `setup_cli_logging()`). The default training view is a narrated, interpreted report (`interpret_epoch()` in `src/train.py`); `--verbose` (on `src.train`, `src.generate`, and `run_pipeline.sh`) adds the technical diagnostics (tensor shapes, layer table, weight/update/gradient norms, entropy, Keras `model.summary()`). Interpretation thresholds live in `config.py` (`TRAINING_PLATEAU_DELTA`, `TRAINING_OVERFIT_GAP`, `GENERATION_TEMP_LOW/HIGH`).
+
 ### Mixed precision
 
 Enable with `--mixed-precision` when training on GPUs with float16 tensor cores (NVIDIA Ampere+). This roughly halves training time. Do NOT use on CPU — it will be slower.

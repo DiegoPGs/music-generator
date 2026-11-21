@@ -317,6 +317,21 @@ class TestProcessDataset:
         assert len(arr) > 0
         assert np.all((arr >= 0) & (arr < config.VOCAB_SIZE))
 
+    def test_returns_processing_counts(self, tmp_path):
+        midi_root, csv_path = self._setup(tmp_path, ["d.midi", "e.midi"])
+        out_dir = str(tmp_path / "sequences")
+
+        result = process_dataset(
+            csv_path=csv_path, base_dir=midi_root,
+            vocab_path=str(tmp_path / "vocab.json"),
+            output_dir=out_dir, splits=["train"],
+        )
+
+        assert result["ok"] == 2
+        assert result["errors"] == 0
+        expected_tokens = sum(len(np.load(os.path.join(out_dir, "2004", f))) for f in ["d.npy", "e.npy"])
+        assert result["total_tokens"] == expected_tokens
+
     def test_split_filtering(self, tmp_path):
         midi_root = tmp_path / "maestro" / "2004"
         midi_root.mkdir(parents=True)

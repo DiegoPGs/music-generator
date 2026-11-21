@@ -98,8 +98,52 @@ python -m src.preprocessing
 python -m src.train --epochs 50 --batch-size 64
 
 # 5. Generar
-python -m src.generate --temperature 1.0 --length 512 --output outputs/midi/generated.mid
+python -m src.generate --model outputs/models/best_model.keras --temperature 1.0 --length 512 --output outputs/midi/generated.mid
 ```
+
+O bien, todo el pipeline de una vez: `./run_pipeline.sh` (agrega `--fast` para una prueba corta y `--verbose` para ver los diagnósticos técnicos).
+
+## Cómo leer la salida del entrenamiento
+
+Todos los mensajes del programa están en español y explican qué está pasando. El entrenamiento se narra en cuatro etapas:
+
+1. **Preparación de los datos**: cómo se arma cada ejemplo de entrenamiento, con un fragmento real decodificado ("Tocar Do4", "Esperar 50 ms", …) y el evento que el modelo debe adivinar.
+2. **El modelo**: qué hace cada capa en lenguaje sencillo, cuántos parámetros tiene y cuál es el punto de partida si adivinara al azar.
+3. **Entrenamiento**: una barra de progreso por época y, al terminar cada una, un bloque como este:
+
+```
+Época 3/50 · duró 4 min 12 s · tiempo restante estimado: hasta 3 h 17 min
+               Entrenamiento                  Validación
+  Pérdida      2.8117  (-0.0376 ↓ mejora)     2.9240  (-0.1228 ↓ mejora)
+  Precisión    15.04%  (+1.56 ↑ mejora)       16.67%  (-2.08 ↓ empeora)
+  Perplejidad  16.6                           18.6  (al azar: 388)
+  ✔ Mejor modelo hasta ahora → guardado en outputs/models/best_model.keras
+  Interpretación: El modelo sigue aprendiendo y lo aprendido también funciona con piezas que nunca vio.
+  Qué predice para el ejemplo de la Etapa 1:
+    Sus apuestas   : 1) Esperar 500 ms 19.3%  2) Esperar 250 ms 16.7%  3) Tocar Si4 (B4) 7.5%
+    Respuesta real : Soltar Mi4 (E4) (le dio 5.3% de probabilidad)
+  Tipo de evento           Lo que predice el modelo          Real en el lote
+  Notas que empiezan       [█████░░░░░░░░░░░░░░░]  26.6%      21.9%
+  ...
+```
+
+4. **Resumen**: por qué terminó (todas las épocas o *early stopping*), cuál fue la mejor época, cuánto mejoró respecto al azar, una tabla con todas las épocas y el comando para generar música.
+
+| Métrica | Qué significa | Mejor si… |
+|---------|---------------|-----------|
+| Pérdida | Qué tan "sorprendido" está el modelo por el evento correcto | baja |
+| Precisión | % de veces que su primera opción es exactamente el evento correcto | sube |
+| Perplejidad | Entre cuántas opciones duda en promedio (al azar serían 388) | baja |
+| Entrenamiento vs. validación | La validación usa piezas que el modelo nunca estudia | ambas mejoran juntas |
+
+La línea **Interpretación** resume la época en una frase:
+
+- *Sigue aprendiendo*: la pérdida de validación bajó de forma clara.
+- *Se está estancando*: la validación casi no cambió (umbral `TRAINING_PLATEAU_DELTA` en `config.py`).
+- *Posible sobreajuste*: mejora en entrenamiento pero empeora en validación, o la brecha entre ambas supera `TRAINING_OVERFIT_GAP`.
+- *Se agotó la paciencia*: después de `EARLY_STOPPING_PATIENCE` épocas sin mejorar, el entrenamiento se detiene y se conserva el mejor modelo.
+
+Con `--verbose` (en `src.train`, `src.generate` o `run_pipeline.sh`) se agregan los diagnósticos técnicos: formas de los tensores, tabla de capas, normas de pesos, actualizaciones y gradientes (`||W||`, `||ΔW||`, `||∇_W L||`), entropía de la salida y el `model.summary()` de Keras. Las mismas métricas quedan en TensorBoard: `tensorboard --logdir outputs/logs`.
 
 ## Referencia base
 

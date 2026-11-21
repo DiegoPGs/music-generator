@@ -12,8 +12,9 @@ from src.train import (AcademicTrainingCallback, build_callbacks,
                        categorize_token_id, compute_layer_weight_stats,
                        compute_musical_domain_insights,
                        compute_sample_gradient_norms, describe_token,
-                       inspect_pipeline_sample, prepare_for_training,
-                       set_seeds, summarize_model_layers, train)
+                       inspect_pipeline_sample, interpret_epoch,
+                       prepare_for_training, set_seeds, summarize_model_layers,
+                       train)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -308,7 +309,8 @@ class TestAcademicTrainingCallback:
         assert "global" in first["grad_norms"]
         assert first["musical_insights"] is not None
 
-    def test_logs_all_four_academic_stages_cleanly(self, tmp_path, caplog):
+    @staticmethod
+    def _run_logged_training(tmp_path, caplog, verbose: bool = False) -> str:
         import logging
 
         model = _small_model()
@@ -326,14 +328,85 @@ class TestAcademicTrainingCallback:
                 steps_per_epoch=2,
                 validation_steps=1,
                 enable_progress_bar=False,
+                verbose=verbose,
             )
+        return caplog.text
 
-        assert "STAGE 1/4 — DATA & TENSOR PIPELINE WALKTHROUGH" in caplog.text
-        assert "STAGE 2/4 — MODEL ARCHITECTURE & THEORETICAL BASELINES" in caplog.text
-        assert "STAGE 3/4 — ITERATIVE OPTIMIZATION" in caplog.text
-        assert "EPOCH 01/02 SUMMARY" in caplog.text
-        assert "EPOCH 02/02 SUMMARY" in caplog.text
-        assert "STAGE 4/4 — POST-TRAINING ACADEMIC SUMMARY" in caplog.text
+    def test_logs_all_four_stages_in_spanish(self, tmp_path, caplog):
+        text = self._run_logged_training(tmp_path, caplog)
+
+        assert "ETAPA 1/4 · PREPARACIÓN DE LOS DATOS" in text
+        assert "ETAPA 2/4 · EL MODELO" in text
+        assert "CÓMO LEER LAS MÉTRICAS" in text
+        assert "ETAPA 3/4 · ENTRENAMIENTO" in text
+        assert "Época 1/2" in text
+        assert "Época 2/2" in text
+        assert "Interpretación:" in text
+        assert "ETAPA 4/4 · RESUMEN DEL ENTRENAMIENTO" in text
+        assert "Mejor época: #" in text
+        assert "Siguiente paso" in text
+
+    def test_default_view_hides_technical_diagnostics(self, tmp_path, caplog):
+        text = self._run_logged_training(tmp_path, caplog, verbose=False)
+        assert "||∇_W L||_2" not in text
+        assert "Entropía de salida" not in text
+
+    def test_verbose_view_shows_technical_diagnostics(self, tmp_path, caplog):
+        text = self._run_logged_training(tmp_path, caplog, verbose=True)
+        assert "||∇_W L||_2" in text
+        assert "Entropía de salida" in text
+        assert "Detalle técnico por capa" in text
+
+    def test_records_include_interpretation(self):
+        model = _small_model()
+        model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+        prep_ds = prepare_for_training(_tiny_dataset())
+        cb = AcademicTrainingCallback(total_epochs=2, batch_size=_BATCH, seq_len=_SEQ, steps_per_epoch=2,
+                                      patience=3, enable_progress_bar=False)
+        model.fit(prep_ds, validation_data=prep_ds, epochs=2, steps_per_epoch=2, validation_steps=1,
+                  callbacks=[cb], verbose=0)
+        assert cb.epoch_records[0]["interpretation"]["kind"] == "first"
+        assert cb.epoch_records[1]["interpretation"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# interpret_epoch
+# ---------------------------------------------------------------------------
+
+
+def _rec(train_loss: float, val_loss: float, wait: int = 0, epoch: int = 2) -> dict:
+    return {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss, "wait_epochs": wait, "best_epoch": 1}
+
+
+class TestInterpretEpoch:
+    def test_first_epoch(self):
+        assert interpret_epoch(_rec(3.0, 3.1, epoch=1), None)["kind"] == "first"
+
+    def test_improving(self):
+        result = interpret_epoch(_rec(2.8, 2.9), _rec(3.0, 3.1))
+        assert result["kind"] == "improving"
+
+    def test_plateau(self):
+        result = interpret_epoch(_rec(2.99, 3.101), _rec(3.0, 3.1), plateau_delta=0.005)
+        assert result["kind"] == "plateau"
+
+    def test_overfitting_when_train_falls_and_val_rises(self):
+        result = interpret_epoch(_rec(2.5, 3.2, wait=1), _rec(2.7, 3.1))
+        assert result["kind"] == "overfitting"
+        assert "sobreajuste" in result["message"]
+
+    def test_large_gap_flagged(self):
+        result = interpret_epoch(_rec(2.0, 2.5), _rec(2.0, 2.6), overfit_gap=0.15)
+        assert result["kind"] == "gap"
+
+    def test_worse_without_divergence(self):
+        result = interpret_epoch(_rec(3.1, 3.2, wait=1), _rec(3.0, 3.1))
+        assert result["kind"] == "worse"
+
+    def test_patience_exhausted_takes_priority(self):
+        result = interpret_epoch(_rec(2.5, 3.2, wait=3), _rec(2.7, 3.1), patience=3)
+        assert result["kind"] == "stopping"
+        assert "época 1" in result["message"]
 
 
 # ---------------------------------------------------------------------------

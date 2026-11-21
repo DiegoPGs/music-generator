@@ -61,8 +61,8 @@ def build_model(
 
 
 def _log_summary(model: tf.keras.Model) -> None:
-    """Write model.summary() to the logger at INFO level."""
+    """Write model.summary() to the logger at DEBUG level (shown with --verbose)."""
     buf = io.StringIO()
     model.summary(print_fn=lambda line: buf.write(line + "\n"))
     for line in buf.getvalue().splitlines():
-        logger.info(line)
+        logger.debug(line)

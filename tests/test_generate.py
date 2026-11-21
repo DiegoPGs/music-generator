@@ -8,8 +8,9 @@ import pytest
 import tensorflow as tf
 
 import config
-from src.generate import (generate, generate_midi, load_model_and_vocab,
-                          sample_token, seed_from_midi, seed_from_random)
+from src.generate import (describe_temperature, generate, generate_midi,
+                          load_model_and_vocab, sample_token, seed_from_midi,
+                          seed_from_random, summarize_events)
 from src.model import build_model
 from src.preprocessing import build_vocabulary, save_vocabulary
 from src.train import train
@@ -282,3 +283,38 @@ class TestGenerateMidi:
         generate_midi(model_path, out1, vocab_path=vocab_path, length=30, temperature=0.0, rng_seed=7)
         generate_midi(model_path, out2, vocab_path=vocab_path, length=30, temperature=0.0, rng_seed=7)
         assert open(out1, "rb").read() == open(out2, "rb").read()
+
+
+# ---------------------------------------------------------------------------
+# Human-readable summaries
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizeEvents:
+    def test_counts_notes_duration_and_range(self):
+        events = [
+            "SET_VELOCITY_16", "NOTE_ON_60", "NOTE_ON_64", "TIME_SHIFT_50",
+            "NOTE_OFF_60", "NOTE_OFF_64", "TIME_SHIFT_100", "NOTE_ON_72",
+        ]
+        summary = summarize_events(events)
+        assert summary["total_events"] == 8
+        assert summary["note_count"] == 3
+        assert summary["duration_sec"] == pytest.approx(1.5)
+        assert summary["min_pitch"] == 60
+        assert summary["max_pitch"] == 72
+        assert summary["category_counts"] == {"NOTE_ON": 3, "NOTE_OFF": 2, "TIME_SHIFT": 2, "SET_VELOCITY": 1}
+
+    def test_empty_sequence(self):
+        summary = summarize_events([])
+        assert summary["note_count"] == 0
+        assert summary["duration_sec"] == 0.0
+        assert summary["min_pitch"] is None
+
+
+class TestDescribeTemperature:
+    @pytest.mark.parametrize(
+        "temperature, word",
+        [(0.0, "determinista"), (0.5, "conservadora"), (1.0, "equilibrada"), (1.5, "experimental")],
+    )
+    def test_temperature_bands(self, temperature, word):
+        assert describe_temperature(temperature).startswith(word)
